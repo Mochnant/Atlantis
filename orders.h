@@ -205,6 +205,7 @@ public:
 	int skill; ///< -1 for none
 	int productivity;
 	int limit;
+	int use; /// for recycling and OR preference (future enhancement)
 };
 
 /// Produce multiple items

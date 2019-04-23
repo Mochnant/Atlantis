@@ -1946,6 +1946,33 @@ void Game::ProcessProduceOrder(Unit *u, AString *o, OrdersCheck *pCheck)
 	p->item = it;
 	p->skill = ItemDefs[it].pSkill;
 	p->limit = -1; // no limit
+	p->use = -1; // no use item
+
+	// check for USE
+	token = o->gettoken();
+	if (token)
+	{
+		if (*token == "USE")
+		{
+			delete token;
+			token = o->gettoken();
+			p->use = 0; // check for valid use
+		}
+
+		if (token)
+		{
+			p->use = ParseEnabledItem(token);
+			if (p->use > 0)
+				p->skill = ItemDefs[p->use].pSkill;
+			delete token;
+		}
+
+		if (p->use == 0)
+		{
+			ParseError(pCheck, u, 0, "PRODUCE: Should be PRODUCE <item> USE <item>.");
+			p->use = -1;
+		}
+	}
 
 	// check for LIMIT
 	token = o->gettoken();

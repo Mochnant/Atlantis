@@ -773,8 +773,42 @@ bool Game::RunUnitProduce(ARegion *r, Unit *u, ProduceOrder *o, ProduceIntermedi
 	}
 
 	const ItemType &item = ItemDefs[o->item];
-	const int input = ItemDefs[o->item].pInput[0].item;
-	if (input == -1)
+	int input = ItemDefs[o->item].pInput[0].item;  // This is an T/F input check, only first needed
+	int bonus_item_idx = ItemDefs[o->item].mult_item;
+	int bonus_item_boost = ItemDefs[o->item].mult_val;
+
+	/// PRODUCE iron USE swor
+	ItemType *use_item = NULL;
+	if (o->use != -1)
+	{
+		use_item = &ItemDefs[o->use];
+		bool use_item_valid = false;
+
+		// Check if use_item is an output of the produce item
+		for (unsigned c = 0; c < sizeof(ItemDefs->pInput)/sizeof(Materials); ++c)
+		{
+			const int i = ItemDefs[o->use].pInput[c].item;
+			if (i == -1)
+				continue;
+
+			if (i == o->item)
+			{
+				use_item_valid = true;
+			}
+		}
+
+		if (!use_item_valid)
+		{
+			u->Error(AString("PRODUCE: ") + use_item->abr + " can't be used to make " + item.abr + ".");
+			return true;
+		}
+
+		input = o->use;
+		bonus_item_idx = use_item->mult_item;
+		bonus_item_boost = use_item->mult_val;
+	}
+
+	if (input == -1 && !use_item)
 	{
 		u->Error(AString("PRODUCE: ") + item.abr + ": can't use multiple PRODUCE commands with raw materials.");
 
@@ -799,8 +833,6 @@ bool Game::RunUnitProduce(ARegion *r, Unit *u, ProduceOrder *o, ProduceIntermedi
 	// find the max we can possibly produce based on man-months of labor
 	const int base_men = u->GetMen();
 	const int num_men = base_men - pi->menUsed_;
-	const int bonus_item_idx = ItemDefs[o->item].mult_item;
-	const int bonus_item_boost = ItemDefs[o->item].mult_val;
 
 	int num_bonus_items = num_men; // assume item -1 (no item for bonus)
 	std::map<int, int>::iterator labor_remainder = pi->manMonthsAvail_.find(o->skill);
@@ -853,18 +885,23 @@ bool Game::RunUnitProduce(ARegion *r, Unit *u, ProduceOrder *o, ProduceIntermedi
 		maxproduced = o->limit;
 	}
 
+	int o_item = o->item;
+	if (use_item)
+		o_item = o->use;
+
+
 	// if item only requires one of its inputs
-	if (ItemDefs[o->item].flags & ItemType::ORINPUTS)
+	if (ItemDefs[o_item].flags & ItemType::ORINPUTS)
 	{
 		// figure out the max we can produce based on the inputs
 		int count = 0;
 		for (unsigned c = 0; c < sizeof(ItemDefs->pInput)/sizeof(Materials); ++c)
 		{
-			const int i = ItemDefs[o->item].pInput[c].item;
+			const int i = ItemDefs[o_item].pInput[c].item;
 			if (i == -1)
 				continue;
 
-			const int amt_req = ItemDefs[o->item].pInput[c].amt;
+			const int amt_req = ItemDefs[o_item].pInput[c].amt;
 			count += u->canConsume(i, amt_req * (maxproduced - count)) / amt_req;
 		}
 
@@ -875,12 +912,12 @@ bool Game::RunUnitProduce(ARegion *r, Unit *u, ProduceOrder *o, ProduceIntermedi
 		count = maxproduced;
 		for (unsigned c = 0; c < sizeof(ItemDefs->pInput)/sizeof(Materials); ++c)
 		{
-			const int i = ItemDefs[o->item].pInput[c].item;
+			const int i = ItemDefs[o_item].pInput[c].item;
 			if (i == -1)
 				continue;
 
 			// how much is needed per
-			const int a = ItemDefs[o->item].pInput[c].amt;
+			const int a = ItemDefs[o_item].pInput[c].amt;
 
 			// how much can we get
 			const int amt = u->canConsume(i, count * a);
@@ -904,11 +941,11 @@ bool Game::RunUnitProduce(ARegion *r, Unit *u, ProduceOrder *o, ProduceIntermedi
 		// figure out the max we can produce based on all inputs
 		for (unsigned c = 0; c < sizeof(ItemDefs->pInput)/sizeof(Materials); ++c)
 		{
-			const int i = ItemDefs[o->item].pInput[c].item;
+			const int i = ItemDefs[o_item].pInput[c].item;
 			if (i == -1)
 				continue;
 
-			const int a = ItemDefs[o->item].pInput[c].amt;
+			const int a = ItemDefs[o_item].pInput[c].amt;
 			const int amt = u->canConsume(i, a * maxproduced);
 			if (amt / a < maxproduced)
 			{
@@ -919,23 +956,23 @@ bool Game::RunUnitProduce(ARegion *r, Unit *u, ProduceOrder *o, ProduceIntermedi
 		// deduct the items spent
 		for (unsigned c = 0; c < sizeof(ItemDefs->pInput)/sizeof(Materials); ++c)
 		{
-			const int i = ItemDefs[o->item].pInput[c].item;
+			const int i = ItemDefs[o_item].pInput[c].item;
 			if (i == -1)
 				continue;
 
-			const int a = ItemDefs[o->item].pInput[c].amt;
+			const int a = ItemDefs[o_item].pInput[c].amt;
 			u->consume(i, maxproduced * a);
 		}
 	}
 
 	// back calculate number of men working
-	if (ItemDefs[o->item].flags & ItemType::SKILLOUT)
+	if (ItemDefs[o_item].flags & ItemType::SKILLOUT)
 	{
 		pi->menUsed_ = maxproduced;
 	}
 	else // man months with item boost
 	{
-		int req_labor = maxproduced * ItemDefs[o->item].pMonths;
+		int req_labor = maxproduced * ItemDefs[o_item].pMonths;
 
 		// check for labor remainder
 		if (labor_remainder->second >= req_labor)
@@ -993,7 +1030,7 @@ bool Game::RunUnitProduce(ARegion *r, Unit *u, ProduceOrder *o, ProduceIntermedi
 	}
 
 	// now give the items produced
-	int output = maxproduced * ItemDefs[o->item].pOut;
+	int output = maxproduced * ItemDefs[o_item].pOut;
 	if (ItemDefs[o->item].flags & ItemType::SKILLOUT)
 		output *= level;
 
@@ -1191,6 +1228,10 @@ void Game::RunAProduction(ARegion *r, Production *p)
 			ProduceOrder *po = (ProduceOrder*)u->monthorders;
 			if (po->skill != p->skill || po->item != p->itemtype)
 				continue;
+
+			// skip raw production if recycle/use included
+			if (po->use != -1)
+				return;
 
 			// we need to implement a hack to avoid overflowing
 			int ubucks = 0;
